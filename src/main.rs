@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::{
     fs,
-    io::{BufReader, Read},
+    io::{self, Read},
 };
 
 #[derive(Parser)]
@@ -29,7 +29,7 @@ struct FileMetaDataExtract {
 
 impl FileMetaDataExtract {
     fn new(_file: fs::File) -> Self {
-        FileMetaDataExtract { file: _file };
+        FileMetaDataExtract { file: _file }
     }
 
     fn get_num_of_bytes(&self) -> io::Result<u64> {
@@ -37,13 +37,13 @@ impl FileMetaDataExtract {
         Ok(byte_count)
     }
 
-    fn get_num_of_chars(&self) -> io::Result<u64> {}
+    // fn get_num_of_chars(&self) -> io::Result<u64> {}
 
     fn get_num_of_words(&self) -> io::Result<u64> {
         let mut word_count: u64 = 0;
         let mut word_active: bool = false;
 
-        let reader = BufReader::new(&self.file);
+        let reader = io::BufReader::new(&self.file);
 
         for byte in reader.bytes() {
             match byte {
@@ -69,7 +69,7 @@ impl FileMetaDataExtract {
     fn get_num_of_lines(&self) -> io::Result<u64> {
         let mut line_count: u64 = 0;
         let mut empty: bool = true;
-        let reader = BufReader::new(&self.file);
+        let reader = io::BufReader::new(&self.file);
 
         for byte in reader.bytes() {
             match byte {
@@ -106,12 +106,6 @@ fn main() {
             let print_words = args.words || print_all;
             let print_lines = args.lines || print_all;
             let print_chars = args.chars || print_all;
-
-            
-
-            if print_all {
-
-            } else if 
 
             let num_of_bytes = file.metadata();
 
