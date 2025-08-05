@@ -1,126 +1,26 @@
 use std::{
-    fs::{self, File},
-    io::{BufReader, Error, Read, Seek, SeekFrom},
+    fs::{File, Metadata},
+    io::{BufReader, Error, Read, stdin},
     str::{Utf8Error, from_utf8},
 };
 
-/// A structure to hold a file and provide statistics about its contents.
-pub(crate) struct FileStats {
-    file: fs::File,
-}
+use crate::dao::{StatErrors, Stats};
 
-impl FileStats {
-    /// Creates a new instance of `FileStats` by opening the file at the given path.
-    ///
-    /// # Arguments
-    ///
-    /// * `file_path` - A string slice that holds the path of the file.
-    ///
-    /// # Returns
-    ///
-    /// * `Result<Self, Error>` - On success, returns a `FileStats` instance. On failure, returns an I/O error.
-    pub fn new(file_path: &str) -> Result<Self, Error> {
-        let file: File = fs::File::open(file_path)?;
-        return Ok(FileStats { file });
-    }
-
-    /// Calculates the number of bytes in the file.
-    ///
-    /// # Returns
-    ///
-    /// * `Result<u64, Error>` - On success, returns the byte count. On failure, returns an I/O error.
-    pub fn get_num_of_bytes(&self) -> Result<u64, Error> {
-        let byte_count: u64 = self.file.metadata()?.len();
-        return Ok(byte_count);
-    }
-
-    /// Calculates the number of words in the file.
-    ///
-    /// # Returns
-    ///
-    /// * `Result<u64, Error>` - On success, returns the word count. On failure, returns an I/O error.
-    pub fn get_num_of_words(&mut self) -> Result<u64, Error> {
-        let mut word_count: u64 = 0;
-        let mut word_active: bool = false;
-
-        // Reset file cursor to the start.
-        self.file.seek(SeekFrom::Start(0))?;
-
-        let reader: BufReader<&File> = BufReader::new(&self.file);
-
-        // Iterate through each byte in the file.
-        for byte in reader.bytes() {
-            match byte {
-                Ok(_byte) => {
-                    // Check if the byte is not whitespace, indicating a word.
-                    if !_byte.is_ascii_whitespace() {
-                        if !word_active {
-                            word_count += 1;
-                            word_active = true;
-                        }
-                    } else if word_active {
-                        word_active = false;
-                    }
-                }
-                Err(err) => {
-                    return Err(err);
-                }
-            }
-        }
-
-        return Ok(word_count);
-    }
-
-    /// Calculates the number of lines in the file.
-    ///
-    /// # Returns
-    ///
-    /// * `Result<u64, Error>` - On success, returns the line count. On failure, returns an I/O error.
-    pub fn get_num_of_lines(&mut self) -> Result<u64, Error> {
-        let mut line_count: u64 = 0;
-        let mut empty: bool = true;
-
-        // Reset file cursor to the start.
-        self.file.seek(SeekFrom::Start(0))?;
-
-        let reader: BufReader<&File> = BufReader::new(&self.file);
-
-        // Iterate through each byte in the file.
-        for byte in reader.bytes() {
-            match byte {
-                Ok(_byte) => {
-                    empty = false;
-
-                    // Check for newline character.
-                    if _byte == b'\n' {
-                        line_count += 1;
-                    }
-                }
-                Err(err) => {
-                    return Err(err);
-                }
-            }
-        }
-
-        // If file is not empty but no lines are counted, count as one line.
-        if !empty && line_count == 0 {
-            line_count = 1;
-        }
-
-        return Ok(line_count);
-    }
-
-    /// Calculates the number of characters in the file.
-    ///
-    /// # Returns
-    ///
-    /// * `Result<u64, Error>` - On success, returns the character count. On failure, returns an I/O error.
-    pub fn get_num_of_chars(&mut self) -> Result<u64, Error> {
-        let mut char_cnt: usize = 0;
+pub trait DataStats {
+    fn get_stats(source: &mut dyn Read) -> Result<Stats, Error> {
+        let mut stats: Stats = Stats {
+            bytes_count: 0,
+            words_count: 0,
+            lines_count: 0,
+            chars_count: 0,
+        };
         let mut buffer: [u8; 1024] = [0u8; 1024];
         let mut rem: Vec<u8> = Vec::new();
+        let mut word_active: bool = false;
+        let mut empty: bool = true;
 
-        // Helper function to count characters in erroneous UTF-8 sequences.
+        // Helper function to count whatever valid characters
+        // available from the start in erroneous UTF-8 sequences.
         let get_erroneous_part_count = |err: &Utf8Error, _rem: &Vec<u8>| -> usize {
             let valid_upto: usize = err.valid_up_to();
 
@@ -135,23 +35,21 @@ impl FileStats {
             }
         };
 
-        // Reset file cursor to the start.
-        self.file.seek(SeekFrom::Start(0))?;
-
-        let mut reader: BufReader<&File> = BufReader::new(&self.file);
+        let mut reader = BufReader::new(source);
 
         loop {
             let bytes_read: usize = reader.read(&mut buffer)?;
+            // update the words_count with the number of read bytres that are not whitesapce
 
             if bytes_read == 0 {
                 // Handle any remaining bytes not processed.
                 if !rem.is_empty() {
                     match from_utf8(&rem) {
                         Ok(utf_seq) => {
-                            char_cnt += utf_seq.chars().count();
+                            stats.chars_count += utf_seq.chars().count();
                         }
                         Err(err) => {
-                            char_cnt += get_erroneous_part_count(&err, &rem);
+                            stats.chars_count += get_erroneous_part_count(&err, &rem);
                         }
                     }
                 }
@@ -159,23 +57,118 @@ impl FileStats {
                 break;
             }
 
+            stats.bytes_count += bytes_read;
+            empty = false;
+
+            for byte in &buffer[0..bytes_read] {
+                if *byte == b'\n' {
+                    stats.lines_count += 1;
+                }
+
+                if !byte.is_ascii_whitespace() {
+                    if !word_active {
+                        stats.words_count += 1;
+                        word_active = true;
+                    }
+                } else if word_active {
+                    word_active = false;
+                }
+            }
+
             let mut rem_cpy: Vec<u8> = rem.clone();
             rem_cpy.extend_from_slice(&buffer[0..bytes_read]);
 
             match from_utf8(&rem_cpy) {
                 Ok(utf_seq) => {
-                    char_cnt += utf_seq.chars().count();
+                    stats.chars_count += utf_seq.chars().count();
                     rem.clear();
                 }
 
                 Err(err) => {
                     let valid_upto: usize = err.valid_up_to();
-                    char_cnt += get_erroneous_part_count(&err, &rem_cpy);
+                    stats.chars_count += get_erroneous_part_count(&err, &rem_cpy);
                     rem = rem_cpy[valid_upto..].to_vec();
                 }
             }
         }
 
-        return Ok(char_cnt as u64);
+        if !empty && stats.lines_count == 0 {
+            stats.lines_count = 1;
+        }
+
+        return Ok(stats);
+    }
+}
+
+pub struct FileStats {
+    pub(crate) stats: Stats,
+}
+
+pub struct StdInStats {
+    pub(crate) stats: Stats,
+}
+
+impl DataStats for FileStats {}
+
+impl FileStats {
+    pub fn new(file_path: &str) -> (FileStats, StatErrors) {
+        let file_result: Result<File, Error> = File::open(file_path);
+        let no_fields_all_errors: (FileStats, StatErrors) = (
+            FileStats {
+                stats: Stats::new(),
+            },
+            StatErrors::new_all_fields_errors(),
+        );
+
+        if file_result.is_err() {
+            return no_fields_all_errors;
+        }
+
+        let file: &mut File = &mut file_result.unwrap();
+        let stat_result: Result<Stats, Error> = Self::get_stats(file);
+
+        if stat_result.is_err() {
+            let byte_count_result: Result<Metadata, Error> = file.metadata();
+
+            if byte_count_result.is_err() {
+                return no_fields_all_errors;
+            }
+
+            let byte_count: usize = byte_count_result.unwrap().len() as usize;
+            let mut stats: Stats = Stats::new();
+            stats.bytes_count = byte_count;
+            let mut errors: StatErrors = StatErrors::new_all_fields_errors();
+            errors.bytes_count = None;
+
+            return (FileStats { stats }, errors);
+        }
+
+        return (
+            FileStats {
+                stats: stat_result.unwrap(),
+            },
+            StatErrors::new(),
+        );
+    }
+}
+
+impl DataStats for StdInStats {}
+
+impl StdInStats {
+    pub fn new() -> (StdInStats, StatErrors) {
+        match Self::get_stats(&mut stdin()) {
+            Ok(stats) => {
+                return (StdInStats { stats }, StatErrors::new());
+            }
+            Err(err) => {
+                eprintln!("{}", err);
+                return (
+                    StdInStats {
+                        stats: Stats::new(),
+                    },
+                    StatErrors::new_all_fields_errors(),
+                );
+            }
+        }
     }
 }

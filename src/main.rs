@@ -1,15 +1,17 @@
+mod dao;
 mod file_stats;
 
+use crate::dao::{DataSource, StatErrors};
 use clap::Parser;
-use file_stats::FileStats;
+use file_stats::{DataStats, FileStats, StdInStats};
 
 /// Command line interface for the word count tool.
 #[derive(Parser)]
 #[clap(name = "m_wc", about = "Count lines, words, and bytes.")]
 struct Cli {
     /// The path to the file to be analyzed.
-    #[arg(index = 1, required = true)]
-    file_path: String,
+    #[arg(index = 1)]
+    file_path: Option<String>,
 
     /// Flag to count bytes in the file.
     #[arg(short, long)]
@@ -31,71 +33,38 @@ struct Cli {
 fn main() {
     // Parse command line arguments.
     let args: Cli = Cli::parse();
-    let file_path: String = args.file_path;
-
-    match FileStats::new(&file_path) {
-        Ok(mut file) => {
-            // Default case.
-            let print_all: bool = !args.lines && !args.words && !args.bytes && !args.chars;
-
-            // Print the number of bytes if requested.
-            if args.bytes || print_all {
-                match file.get_num_of_bytes() {
-                    Ok(byte_count) => {
-                        println!("{}", byte_count);
-                    }
-                    Err(err) => {
-                        println!("Error parsing the metadata of the file!");
-                        eprintln!("{}", err);
-                    }
-                }
-            }
-
-            // Print the number of words if requested.
-            if args.words | print_all {
-                match file.get_num_of_words() {
-                    Ok(word_count) => {
-                        println!("{}", word_count);
-                    }
-                    Err(err) => {
-                        println!("Error reading the file!");
-                        eprintln!("{}", err);
-                    }
-                }
-            }
-
-            // Print the number of lines if requested.
-            if args.lines || print_all {
-                match file.get_num_of_lines() {
-                    Ok(line_count) => {
-                        println!("{}", line_count);
-                    }
-                    Err(err) => {
-                        println!("Error reading the file!");
-                        eprintln!("{}", err);
-                    }
-                }
-            }
-
-            // Print the number of characters if requested.
-            if args.chars || print_all {
-                match file.get_num_of_chars() {
-                    Ok(char_count) => {
-                        println!("{}", char_count);
-                    }
-                    Err(err) => {
-                        println!("Error reading the file!");
-                        eprintln!("{}", err);
-                    }
-                }
-            }
+    let (source_stats, errors) = match args.file_path {
+        Some(file_path) => {
+            let (s, e) = FileStats::new(&file_path);
+            (DataSource::File(s), e)
         }
-
-        // Handle the error if the file could not be opened.
-        Err(err) => {
-            println!("Error opening the file at the provided path!");
-            eprintln!("{}", err);
+        None => {
+            let (s, e) = StdInStats::new();
+            (DataSource::StdIn(s), e)
         }
+    };
+
+    // let (source_stats, errors): (FileStats, StatErrors) = FileStats::new(&args.file_path.unwrap());
+    // let (source_stats, errors): (StdInStats, StatErrors) = StdInStats::new();
+    let print_all: bool = !args.lines && !args.words && !args.bytes && !args.chars;
+
+    if args.bytes || print_all {
+        println!("Bytes data:\n{}", source_stats.stats().bytes_count);
+        println!("{}", errors.bytes_count.unwrap_or_default());
+    }
+
+    if args.chars || print_all {
+        println!("Characters data:\n{}", source_stats.stats().chars_count);
+        println!("{}", errors.chars_count.unwrap_or_default());
+    }
+
+    if args.words || print_all {
+        println!("Words data:\n{}", source_stats.stats().words_count);
+        println!("{}", errors.words_count.unwrap_or_default());
+    }
+
+    if args.lines || print_all {
+        println!("Lines data:\n{}", source_stats.stats().lines_count);
+        println!("{}", errors.lines_count.unwrap_or_default());
     }
 }
-
