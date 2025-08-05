@@ -1,9 +1,9 @@
 mod dao;
 mod file_stats;
 
-use crate::dao::{DataSource, StatErrors};
+use crate::dao::DataSource;
 use clap::Parser;
-use file_stats::{DataStats, FileStats, StdInStats};
+use file_stats::{FileStats, StdInStats};
 
 /// Command line interface for the word count tool.
 #[derive(Parser)]
